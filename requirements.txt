@@ -1,3 +1,4 @@
 langgraph>=0.2.60,<0.4
 langchain-core>=0.3.0,<0.4
 typing-extensions>=4.8.0
+# httpx optional — OpenAI/Ollama providers use stdlib urllib by default
