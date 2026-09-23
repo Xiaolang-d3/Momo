@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import uuid
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from langgraph.types import Command
 
 from momo.graph import build_graph
+from momo.provider import get_provider
 
 
 OPTIONS = ("同意执行", "跳过", "取消任务")
@@ -17,7 +19,7 @@ OPTIONS = ("同意执行", "跳过", "取消任务")
 
 def _print_banner() -> None:
     print("=" * 56)
-    print("  Momo  ·  离线演示 / HITL 原型")
+    print("  Momo  ·  Agent 底座 / HITL 原型")
     print("=" * 56)
 
 
@@ -82,9 +84,16 @@ def run_agent(
     demo: bool = True,
     thread_id: str | None = None,
     auto_choice: str | None = None,
+    max_tool_retries: int = 1,
 ) -> dict[str, Any]:
     """Run until completion, handling interrupts interactively (or auto_choice)."""
-    graph = build_graph(demo=demo)
+    provider_name = "demo" if demo else (os.environ.get("MOMO_PROVIDER") or "demo")
+    provider = get_provider(provider_name)
+    graph = build_graph(
+        demo=demo,
+        provider=provider,
+        max_tool_retries=max_tool_retries,
+    )
     tid = thread_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": tid}}
 
@@ -92,6 +101,8 @@ def run_agent(
     print(f"thread_id = {tid}")
     print(f"task      = {task}")
     print(f"mode      = {'demo (无 LLM)' if demo else 'llm/fallback'}")
+    print(f"provider  = {provider.name}")
+    print(f"retries   = {max_tool_retries}")
     print()
 
     values: dict[str, Any] = graph.invoke(
@@ -104,6 +115,9 @@ def run_agent(
             "last_tool_result": None,
             "status": "running",
             "history": [],
+            "tool_retries": 0,
+            "block_reason": None,
+            "max_tool_retries": max_tool_retries,
         },
         config=config,
     )
@@ -147,6 +161,8 @@ def _print_summary(values: dict[str, Any] | None) -> None:
     print(f"status           = {values.get('status')}")
     print(f"step_index       = {values.get('step_index')}")
     print(f"last_tool_result = {values.get('last_tool_result')}")
+    if values.get("block_reason"):
+        print(f"block_reason     = {values.get('block_reason')}")
     hist = values.get("history") or []
     if hist:
         print("history:")
@@ -157,7 +173,7 @@ def _print_summary(values: dict[str, Any] | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Momo：最小 LangGraph Agent（工具 + HITL）"
+        description="Momo：Agent 底座（工具 + HITL + 重试/阻塞 + Provider）"
     )
     parser.add_argument(
         "task",
@@ -191,10 +207,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="HITL 自动选择「取消任务」",
     )
+    parser.add_argument(
+        "--max-tool-retries",
+        type=int,
+        default=1,
+        help="工具失败后额外重试次数（默认 1）",
+    )
     args = parser.parse_args(argv)
 
     demo = not args.no_demo
-    task = " ".join(args.task).strip() or "演示：回显、加法与需确认动作"
+    task = " ".join(args.task).strip() or "演示：库检索、HITL 确认与失败重试"
 
     auto_choice = None
     if args.auto_approve:
@@ -205,7 +227,12 @@ def main(argv: list[str] | None = None) -> int:
         auto_choice = "取消任务"
 
     try:
-        values = run_agent(task, demo=demo, auto_choice=auto_choice)
+        values = run_agent(
+            task,
+            demo=demo,
+            auto_choice=auto_choice,
+            max_tool_retries=max(0, int(args.max_tool_retries)),
+        )
     except KeyboardInterrupt:
         print("\n已中断。", file=sys.stderr)
         return 130
@@ -216,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     status = (values or {}).get("status")
     if status == "cancelled":
         return 2
-    if status == "error":
+    if status in ("error", "blocked"):
         return 1
     return 0
 
