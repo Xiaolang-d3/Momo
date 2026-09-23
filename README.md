@@ -38,7 +38,9 @@ momo/
     __init__.py
     __main__.py
     state.py
-    graph.py
+    demo_plan.py       # 离线演示规划 + provider 尝试
+    nodes.py           # reason/decide/confirm/execute
+    graph.py           # StateGraph 装配与路由
     cli.py
     provider/          # Model Provider 骨架
     plugins/           # 场景插件契约（stub）
