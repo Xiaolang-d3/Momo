@@ -65,8 +65,10 @@ _default: ToolRegistry | None = None
 def get_default_registry() -> ToolRegistry:
     global _default
     if _default is None:
+        from momo.plugins import load_plugins
         from momo.tools.builtin import register_builtin_tools
 
         _default = ToolRegistry()
         register_builtin_tools(_default)
+        load_plugins(_default)  # stub: currently no-op
     return _default
